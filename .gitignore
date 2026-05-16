@@ -1,0 +1,35 @@
+# DICOM data — never commit patient data or large medical files
+data/
+
+# Medical image formats
+*.dcm
+*.DCM
+*.nii
+*.nii.gz
+
+# Output files (large binaries)
+output/stl/
+*.stl
+
+# Render outputs — exclude everything inside, but allow images for the README.
+# Must use wildcard (not trailing slash) so negations can override.
+output/renders/*
+!output/renders/*.png
+!output/renders/*.gif
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS
+.DS_Store
+desktop.ini
+Thumbs.db
