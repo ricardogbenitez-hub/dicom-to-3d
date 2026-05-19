@@ -82,7 +82,11 @@ def segment_bone(volume: np.ndarray, spacing: list = (1.0, 1.0, 1.0),
         raise ValueError(f"bone_type must be 'cortical' or 'trabecular'")
 
     threshold = thresholds[bone_type]
-    return extract_surface(volume, threshold=threshold, spacing=spacing)
+    # Trabecular bone (150–400 HU) is heterogeneous — σ=1.5 suppresses spikes
+    # in vertebral bodies and cancellous regions that σ=1.0 leaves behind.
+    sigma = 1.5 if bone_type == "trabecular" else 1.0
+    return extract_surface(volume, threshold=threshold, spacing=spacing,
+                           smooth_sigma=sigma)
 
 
 def segment_soft_tissue(volume: np.ndarray, spacing: list = (1.0, 1.0, 1.0),

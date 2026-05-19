@@ -56,11 +56,31 @@ def smooth_mesh(mesh: trimesh.Trimesh, iterations: int = 5) -> trimesh.Trimesh:
 
 def fix_mesh(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     """
-    Attempt to make the mesh watertight (closed manifold).
+    Make the mesh watertight (closed manifold).
     Required for accurate 3D printing and volume calculations.
+
+    Two-stage repair:
+    1. trimesh fill_holes — closes simple planar holes fast
+    2. pymeshfix       — repairs complex non-manifold topology that fill_holes misses
     """
+    # Extra Laplacian pass before repair: smooths spikes that inflate hole count
+    trimesh.smoothing.filter_laplacian(mesh, iterations=5)
+
     mesh.fill_holes()
     mesh.fix_normals()
+
+    if not mesh.is_watertight:
+        try:
+            import pymeshfix
+            vclean, fclean = pymeshfix.clean_from_arrays(
+                np.asarray(mesh.vertices, dtype=np.float64),
+                np.asarray(mesh.faces,    dtype=np.int32),
+            )
+            mesh = trimesh.Trimesh(vertices=vclean, faces=fclean, process=True)
+            mesh.fix_normals()
+        except ImportError:
+            print("pymeshfix not installed — skipping advanced hole repair. "
+                  "Run: pip install pymeshfix")
 
     if mesh.is_watertight:
         print(f"Mesh is watertight. Volume: {mesh.volume / 1000:.1f} cm³")
