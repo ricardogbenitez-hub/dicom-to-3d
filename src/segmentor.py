@@ -21,6 +21,7 @@ Typical HU thresholds:
 """
 
 import numpy as np
+from scipy.ndimage import binary_fill_holes
 from skimage.measure import marching_cubes
 from skimage.filters import gaussian
 from skimage.morphology import binary_closing, ball
@@ -32,16 +33,21 @@ def extract_surface(
     spacing: list = (1.0, 1.0, 1.0),
     smooth_sigma: float = 1.0,
     step_size: int = 1,
+    fill_cavities: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Extract an isosurface mesh from a HU volume using Marching Cubes.
 
     Args:
-        volume:       3D numpy array in Hounsfield Units
-        threshold:    HU isovalue defining the surface (400 = cortical bone)
-        spacing:      voxel size in mm [z, y, x] for correct physical scale
-        smooth_sigma: Gaussian smoothing sigma before extraction (reduces noise)
-        step_size:    marching cubes step size (1 = full res, 2 = half res, faster)
+        volume:         3D numpy array in Hounsfield Units
+        threshold:      HU isovalue defining the surface (400 = cortical bone)
+        spacing:        voxel size in mm [z, y, x] for correct physical scale
+        smooth_sigma:   Gaussian smoothing sigma before extraction (reduces noise)
+        step_size:      marching cubes step size (1 = full res, 2 = half res, faster)
+        fill_cavities:  if True, fill enclosed voids in the binary mask before
+                        running Marching Cubes. Prevents hollow-shell artifacts in
+                        bones with low-density trabecular interiors (e.g. tarsals,
+                        vertebral bodies at thick slice thickness).
 
     Returns:
         verts:  (N, 3) array of vertex coordinates in mm
@@ -50,17 +56,27 @@ def extract_surface(
     """
     print(f"Segmenting structure at threshold: {threshold} HU...")
 
-    # Optional Gaussian smoothing to reduce staircase artifacts on the mesh
     if smooth_sigma > 0:
         volume_smooth = gaussian(volume.astype(np.float32), sigma=smooth_sigma)
     else:
         volume_smooth = volume.astype(np.float32)
 
-    # Run Marching Cubes
+    if fill_cavities:
+        # Build binary mask, fill enclosed voids, then feed filled mask to MC.
+        # This converts hollow cortical shells (trabecular interior below threshold)
+        # into solid bones — eliminates tunnels and internal surface artifacts.
+        mask = volume_smooth > threshold
+        mask = binary_fill_holes(mask)
+        volume_smooth = mask.astype(np.float32)
+        level = 0.5
+        print("  Cavity fill applied: hollow bone interiors closed.")
+    else:
+        level = threshold
+
     verts, faces, normals, _ = marching_cubes(
         volume_smooth,
-        level=threshold,
-        spacing=spacing,   # converts voxel coords to mm
+        level=level,
+        spacing=spacing,
         step_size=step_size,
         allow_degenerate=False,
     )
@@ -82,11 +98,9 @@ def segment_bone(volume: np.ndarray, spacing: list = (1.0, 1.0, 1.0),
         raise ValueError(f"bone_type must be 'cortical' or 'trabecular'")
 
     threshold = thresholds[bone_type]
-    # Trabecular bone (150–400 HU) is heterogeneous — σ=1.5 suppresses spikes
-    # in vertebral bodies and cancellous regions that σ=1.0 leaves behind.
     sigma = 1.5 if bone_type == "trabecular" else 1.0
     return extract_surface(volume, threshold=threshold, spacing=spacing,
-                           smooth_sigma=sigma)
+                           smooth_sigma=sigma, fill_cavities=True)
 
 
 def segment_soft_tissue(volume: np.ndarray, spacing: list = (1.0, 1.0, 1.0),

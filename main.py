@@ -21,7 +21,7 @@ import sys
 from src.loader import load_dicom_series
 from src.preprocessor import remove_table, resample_volume
 from src.segmentor import segment_bone, segment_soft_tissue
-from src.mesh_utils import build_mesh, keep_largest_component, smooth_mesh, fix_mesh, export_stl, get_mesh_stats
+from src.mesh_utils import build_mesh, keep_largest_component, filter_max_bodies, smooth_mesh, fix_mesh, reorient_for_printing, export_stl, get_mesh_stats
 from src.visualizer import show_slices, save_slice_animation
 
 
@@ -36,6 +36,21 @@ def parse_args():
                         help="Anatomical structure to segment")
     parser.add_argument("--smooth",     type=int, default=5,
                         help="Laplacian smoothing iterations (default: 5)")
+    parser.add_argument("--min-component-ratio", type=float, default=0.01,
+                        metavar="FLOAT",
+                        help="Minimum component size as fraction of total faces. "
+                             "Use higher values (0.02-0.05) to discard floating "
+                             "fragments. Default: 0.01")
+    parser.add_argument("--max-bodies", type=int, default=None,
+                        metavar="N",
+                        help="Keep only the N largest connected components after "
+                             "ratio filtering. Use --max-bodies 1 for a single "
+                             "structure (femur, tibia). Omit to keep all components "
+                             "that pass --min-component-ratio.")
+    parser.add_argument("--reorient", action="store_true",
+                        help="Rotate the mesh so the longest axis lies along X. "
+                             "Prevents elongated structures (foot, femur) from "
+                             "loading upright in slicers.")
     parser.add_argument("--step-size",  type=int, default=1,
                         help="Marching cubes step size. Higher = faster but lower res")
     parser.add_argument("--visualize",  action="store_true",
@@ -87,9 +102,14 @@ def run_pipeline(args):
     # ── 5. BUILD & EXPORT MESH ──────────────────────────────
     print("\n[5/5] Building and cleaning mesh...")
     mesh = build_mesh(verts, faces)
-    mesh = keep_largest_component(mesh)
+    mesh = keep_largest_component(mesh, min_ratio=args.min_component_ratio)
+    if args.max_bodies is not None:
+        mesh = filter_max_bodies(mesh, args.max_bodies)
     mesh = smooth_mesh(mesh, iterations=args.smooth)
     mesh = fix_mesh(mesh)
+
+    if args.reorient:
+        mesh = reorient_for_printing(mesh)
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     export_stl(mesh, args.output)
