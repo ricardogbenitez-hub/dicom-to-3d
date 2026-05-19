@@ -38,12 +38,12 @@ python main.py --input ./data/sample --structure bone \
 
 **Supported structures:**
 
-| Flag | Structure | HU Threshold |
-|------|-----------|-------------|
-| `bone` | All bone (default) | > 400 HU |
-| `cortical_bone` | Dense outer bone | > 400 HU |
-| `trabecular_bone` | Spongy inner bone | > 150 HU |
-| `soft_tissue` | Organs / muscle | ~ 40 HU |
+| Flag | Structure | HU Threshold | Gaussian σ |
+|------|-----------|-------------|------------|
+| `bone` | All bone (default) | > 400 HU | 1.0 |
+| `cortical_bone` | Dense outer bone | > 400 HU | 1.0 |
+| `trabecular_bone` | Spongy inner bone | > 150 HU | 1.5 |
+| `soft_tissue` | Organs / muscle | ~ 40 HU | 1.0 |
 
 ---
 
@@ -84,10 +84,10 @@ Recursively finds all `.dcm` files, reads them with `pydicom`, sorts by `ImagePo
 Removes the CT scanner table by keeping only the largest connected body region above −500 HU. Resamples the volume to isotropic 1 mm voxels with `scipy.ndimage.zoom` so the output mesh has correct physical dimensions regardless of the scanner's slice thickness.
 
 **3 — Segmentor** (`src/segmentor.py`)
-Applies a light Gaussian blur (σ = 1) to suppress voxel-level noise, then runs `skimage.measure.marching_cubes` at a tissue-specific HU isovalue. The `spacing` parameter converts voxel indices to millimetres during surface extraction.
+Applies Gaussian smoothing before running `skimage.measure.marching_cubes` at a tissue-specific HU isovalue. Sigma is adaptive: σ = 1.0 for cortical bone and σ = 1.5 for trabecular bone, where heterogeneous density causes spikes in vertebral bodies and cancellous regions. The `spacing` parameter converts voxel indices to millimetres during surface extraction.
 
 **4 — Mesh Cleaner** (`src/mesh_utils.py`)
-Splits the raw mesh into connected components and keeps the largest, discarding floating fragments from scan noise or metal artifacts. Applies Laplacian smoothing to reduce the staircase surface artifact from voxelisation. Calls `fill_holes()` and `fix_normals()` for 3D-printing compatibility.
+Splits the raw mesh into connected components and keeps the largest, discarding floating fragments from scan noise or metal artifacts. Applies 10 iterations of Laplacian smoothing (5 from the `--smooth` flag + 5 inside the repair step) to reduce the staircase surface artifact from voxelisation. Hole repair runs in two stages: `trimesh.fill_holes()` for simple planar gaps, then `pymeshfix` for complex non-manifold topology — guaranteeing a watertight mesh compatible with 3D printing slicers.
 
 **5 — STL Export** (`src/mesh_utils.py`)
 Exports a binary STL (compact format, readable by Mimics, 3D Slicer, Meshmixer, and all FDM slicers). Prints vertex/face counts and file size.
@@ -154,6 +154,7 @@ dicom-to-3d/
 | `scipy` | Isotropic resampling, connected components |
 | `scikit-image` | Marching Cubes, Gaussian filter |
 | `trimesh` | Mesh processing, smoothing, STL export |
+| `pymeshfix` | Advanced watertight mesh repair |
 | `matplotlib` | Slice visualisation, 3D mesh renders |
 | `tqdm` | Progress bars |
 | `SimpleITK` | Advanced image I/O (optional) |
