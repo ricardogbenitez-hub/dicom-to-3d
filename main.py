@@ -51,6 +51,28 @@ def parse_args():
                         help="Rotate the mesh so the longest axis lies along X. "
                              "Prevents elongated structures (foot, femur) from "
                              "loading upright in slicers.")
+    parser.add_argument("--sigma",      type=float, default=None,
+                        help="Isotropic Gaussian sigma for HU volume smoothing before "
+                             "thresholding. Default: 1.0 (cortical), 1.5 (trabecular). "
+                             "When --sigma-z is also given, this value is used for XY axes.")
+    parser.add_argument("--sigma-z",    type=float, default=None,
+                        metavar="FLOAT",
+                        help="Z-axis Gaussian sigma (inter-slice direction). Enables "
+                             "anisotropic smoothing: heavy Z smoothing bridges 3mm "
+                             "inter-slice artifacts; low XY sigma (--sigma 0.5) preserves "
+                             "metatarsal shaft detail. Recommended for thick-slice foot CT: "
+                             "--sigma-z 2.0 --sigma 0.5")
+    parser.add_argument("--threshold",  type=float, default=None,
+                        help="HU isovalue for bone surface (default: 400 cortical, "
+                             "150 trabecular). Use 350 for foot/extremity CT where "
+                             "tarsal cortex is less dense than axial skeleton.")
+    parser.add_argument("--bridge",     type=int, default=0,
+                        metavar="MM",
+                        help="Bridge inter-bone gaps to produce a single fused model. "
+                             "Applies morphological closing of radius MM (mm) after the "
+                             "standard r=2 closing. Joint spaces become visible "
+                             "cartilage-like connections. Use 3 or 4 for foot CT tarsal "
+                             "bridging. Default: 0 (disabled, bones may be separate).")
     parser.add_argument("--step-size",  type=int, default=1,
                         help="Marching cubes step size. Higher = faster but lower res")
     parser.add_argument("--visualize",  action="store_true",
@@ -95,7 +117,11 @@ def run_pipeline(args):
     print(f"\n[4/5] Segmenting: {args.structure}...")
     if "bone" in args.structure:
         bone_type = "trabecular" if "trabecular" in args.structure else "cortical"
-        verts, faces, normals = segment_bone(volume, spacing=spacing, bone_type=bone_type)
+        verts, faces, normals = segment_bone(volume, spacing=spacing, bone_type=bone_type,
+                                             sigma_override=args.sigma,
+                                             sigma_z_override=args.sigma_z,
+                                             threshold_override=args.threshold,
+                                             bridge_mm=args.bridge)
     else:
         verts, faces, normals = segment_soft_tissue(volume, spacing=spacing)
 
