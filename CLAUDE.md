@@ -141,6 +141,266 @@ The original threshold=400 HU (cortical only) was wrong for foot bones. The calc
 ## Commit state
 All changes uncommitted. Ready to commit.
 
+---
+
+## Full-Stack Development Plan
+
+### Workflow between Cowork and Claude Code
+1. Cowork defines tasks + acceptance criteria
+2. Cowork updates CLAUDE.md with the plan
+3. Cowork generates a self-contained prompt for Claude Code (includes: what to do + acceptance criteria + instruction to produce a report when done)
+4. Claude Code implements
+5. Claude Code generates a structured report (completed, failed, pending, metrics)
+6. Ricardo verifies visually / functionally, then brings the report back to Cowork
+7. Cowork updates CLAUDE.md with real state, defines next phase
+
+### Architecture
+Three layers, one monorepo:
+- `src/` — existing pipeline, untouched
+- `api/` — FastAPI backend that wraps the pipeline as HTTP service
+- `frontend/` — React (Vite) app, deployed separately to Vercel
+
+Deployment targets:
+- Frontend → Vercel (static, free tier)
+- Backend → Railway (Docker, free tier, supports long-running processes + WebSockets)
+
+### Phase 1 — Minimal FastAPI (CURRENT)
+**Goal:** Wrap the existing pipeline as a REST API. Synchronous execution (request blocks until STL is ready). No queues, no WebSockets. Validates that the pipeline works as an HTTP service and that all CLI parameters have a clean JSON representation.
+
+**New files:**
+```
+api/
+├── main.py        # FastAPI app, CORS config, router registration
+├── schemas.py     # Pydantic models for request/response
+├── worker.py      # Wrapper that calls src/ pipeline modules directly
+└── routes/
+    ├── upload.py  # POST /upload — receives DICOM files (multipart), returns upload_id
+    └── jobs.py    # POST /jobs, GET /jobs/{id}, GET /jobs/{id}/download
+```
+
+**Endpoints:**
+| Method | Route | Description |
+|--------|-------|-------------|
+| `POST` | `/upload` | Receives N DICOM files (multipart/form-data), saves to temp dir, returns `upload_id` |
+| `POST` | `/jobs` | Receives `upload_id` + pipeline params, runs pipeline synchronously, returns `job_id` |
+| `GET` | `/jobs/{id}` | Returns job status (pending/running/completed/failed) + metrics if done |
+| `GET` | `/jobs/{id}/download` | Returns the STL file as binary download |
+
+**Job request body (all CLI params as JSON):**
+```json
+{
+  "upload_id": "abc123",
+  "structure": "bone",
+  "threshold": 225,
+  "sigma": 0.5,
+  "sigma_z": 2.0,
+  "smooth": 10,
+  "step_size": 1,
+  "min_component_ratio": 0.05,
+  "max_bodies": 1,
+  "reorient": true,
+  "bridge": 0
+}
+```
+
+**New packages:** `fastapi`, `uvicorn`, `python-multipart`
+
+**Acceptance criteria — Phase 1 is done when ALL of these pass:**
+1. `uvicorn api.main:app --reload` starts without errors
+2. `POST /upload` correctly saves DICOM files to a temp directory and returns an `upload_id`
+3. `POST /jobs` with `data/samples/foot/` parameters runs the pipeline end-to-end and produces an STL
+4. `GET /jobs/{id}` returns status `completed` with correct metrics (watertight, face count, volume, bounding box)
+5. `GET /jobs/{id}/download` returns a valid downloadable STL file
+6. `python main.py` CLI still works unchanged (regression — do not break existing interface)
+7. Regression test: `python main.py --input data/sample --structure bone --output output/stl/test_regression.stl` completes successfully
+
+**Status:** ✅ Complete — 2026-05-23
+
+**Verified results:**
+- POST /upload: OK — 85 DICOM files, upload_id generated correctly
+- POST /jobs (foot, threshold=225): OK — completed in 10.1s, status: completed
+- GET /jobs/{id}: OK — is_watertight=true, face_count=212,442, volume=255.89 cm³
+- GET /jobs/{id}/download: OK — 10.62 MB valid STL binary
+- CLI regression (colonography): OK — 981,822 faces, watertight, 618.5 cm³, main.py untouched
+
+**Known non-issues carried forward to Phase 2:**
+- `step_size` present in schema but not wired to `segment_bone` — pre-existing CLI gap, no functional impact
+- `jobs_store` is in-memory by design — will persist in Phase 2
+
+**Files created:**
+- `api/__init__.py`
+- `api/main.py`
+- `api/schemas.py`
+- `api/worker.py`
+- `api/routes/__init__.py`
+- `api/routes/upload.py`
+- `api/routes/jobs.py`
+
+### Phase 2 — Async jobs + WebSocket progress (CURRENT)
+**Goal:** POST /jobs returns immediately with job_id. Pipeline runs in background thread. WebSocket endpoint streams real-time progress to the client.
+
+**Files modified:**
+- `api/worker.py` — run_pipeline() accepts a progress callback, updates jobs_store at each stage
+- `api/routes/jobs.py` — POST /jobs launches pipeline in ThreadPoolExecutor, returns immediately. Adds GET /ws/jobs/{id} WebSocket endpoint
+
+**No changes to src/ pipeline modules.**
+
+**Progress message format:**
+```json
+{"stage": "loading",       "percent": 20,  "message": "83 DICOM files loaded"}
+{"stage": "preprocessing", "percent": 40,  "message": "Isotropic resampling complete"}
+{"stage": "segmenting",    "percent": 65,  "message": "Marching cubes in progress"}
+{"stage": "mesh",          "percent": 85,  "message": "Cleaning mesh"}
+{"stage": "completed",     "percent": 100, "metrics": {...}}
+```
+
+**New packages:** None — FastAPI WebSocket support is built in.
+
+**Acceptance criteria — Phase 2 is done when ALL of these pass:**
+1. POST /jobs returns job_id in under 1 second without waiting for the pipeline
+2. GET /jobs/{id} transitions correctly: pending → running → completed
+3. WebSocket /ws/jobs/{id} emits at least 4 progress messages before completed
+4. Regression: python main.py CLI still works unchanged
+5. Regression: POST /upload still works unchanged
+
+**Status:** ✅ Complete — 2026-05-23
+
+**Verified results:**
+- POST /jobs response time: 4ms (limit: 1000ms)
+- WebSocket messages: loading(20%) → preprocessing(45%) → segmenting(70%) → mesh(90%) → completed(100%)
+- Status transitions pending→running→completed: OK
+- CLI regression (colonography): OK — 981,822 faces, 618.5 cm³, watertight
+- POST /upload regression: OK
+- ThreadPoolExecutor(max_workers=2) — intentional OOM protection for concurrent pipeline runs
+
+**Files modified:** api/worker.py, api/routes/jobs.py, requirements.txt
+**Files added:** test_ws.py
+
+### Phase 3 — React Frontend
+**Goal:** Vite + React + Tailwind CSS single-page app. Three screens as a linear wizard. Connects to the FastAPI backend already running on port 8000. No changes to `src/`, `api/`, or `main.py`.
+
+**Status:** ✅ Complete — 2026-05-24
+
+**Acceptance criteria:**
+1. `npm run dev` starts without errors on port 5173 — ✅ Arranca en 538ms
+2. Upload screen: drag & drop + `POST /upload` functional — ✅ 83–85 archivos, upload_id generado
+3. Configure screen: sliders + `POST /jobs` functional — ✅ 7 sliders, pills, checkboxes, input numérico en HU Threshold
+4. Processing screen: WebSocket + progress bar — ✅ 5 mensajes, barra animada, auto-advance en completed
+5. Result screen: Three.js STL viewer — ✅ STLLoader + OrbitControls, autoRotate, toggle Solid/Wireframe
+6. Download STL — ✅ blob URL → trigger `<a>` programático
+7. Dark mode across all screens — ✅ sin CSS variables en texto crítico
+8. Outline buttons visibles en light mode sin hover — ✅ `color: #152033` + `border: 1.5px solid #6a8fae` hardcodeados
+9. No Python files modified — ✅ confirmado con `git diff`
+10. Backend regression — no ejecutado (ningún archivo Python tocado)
+
+**Datasets verified by Ricardo (visual + metrics):**
+
+| Dataset | Threshold | Faces | Watertight | Volume | Time | Bbox |
+|---|---|---|---|---|---|---|
+| Foot (`data/samples/foot/`) | 225 HU | 212,442 | ✓ | 255.9 cm³ | ~10s | 228×128×83mm |
+| Columna+cóccix+pelvis (`data/sample/`) | 400 HU | 1,267,878 | ✓ | 690.1 cm³ | 45.9s | 504×163×287mm |
+
+**Files created:**
+```
+frontend/
+├── index.html
+├── vite.config.js          # @tailwindcss/vite plugin + react plugin
+├── postcss.config.js       # vacío — overridea postcss.config.mjs del directorio raíz
+├── package.json
+├── .env                    # VITE_API_URL=http://localhost:8000
+├── .env.example
+└── src/
+    ├── main.jsx
+    ├── index.css           # @import "tailwindcss" (v4) + slider CSS + progress animation
+    ├── App.jsx             # wizard step state, dark mode state
+    ├── api.js              # axios: uploadDicoms, createJob, getJob, downloadStl, wsUrl
+    ├── components/
+    │   ├── NavBar.jsx
+    │   ├── Stepper.jsx
+    │   └── Spinner.jsx
+    └── screens/
+        ├── UploadScreen.jsx
+        ├── ConfigureScreen.jsx
+        ├── ProcessingScreen.jsx
+        └── ResultScreen.jsx
+```
+
+**Deviations from spec:**
+- **Tailwind v4** (no v3) — sin `tailwind.config.js`. Config vía `@import "tailwindcss"` + plugin `@tailwindcss/vite`. Styling crítico en inline styles.
+- **`processing_time_s`** medido en el frontend (ws.onopen → completed) — no viene del backend.
+- **Three.js directo** para STL viewer (no `@react-three/fiber`) — mayor control sobre render loop.
+- **Bundle ~795KB** minificado — normal con Three.js incluido.
+
+**Bugs encontrados y corregidos durante verificación:**
+- `bounding_box_mm` del API es `[[xmin,ymin,zmin],[xmax,ymax,zmax]]` — frontend calcula `bounds[1][i] - bounds[0][i]`
+- React StrictMode double-mount causaba error transitorio code 1006 — resuelto con variable local `cleanedUp` por closure (inmune a race condition de refs compartidos)
+- Botones outline en dark mode tenían texto invisible — `color: #ddeaf8` en dark, `#152033` en light
+- STL viewer orientación: `geometry.rotateX(-Math.PI/2)` convierte Z=up (convención impresión) → Y=up (Three.js)
+
+**Parámetros óptimos verificados:**
+
+| Estructura | threshold | sigma | sigma_z | smooth | min_ratio | max_bodies | bridge |
+|---|---|---|---|---|---|---|---|
+| Foot (trabecular) | 225 | 0.5 | 2.0 | 10 | 0.05 | 1 | 0 |
+| Columna/cóccix/pelvis | 400 | 0.5 | 0.0 | 7 | 0.01 | 0 | 0 |
+
+### Phase 4 — Deploy
+**Goal:** Hacer el backend deployable como contenedor Docker en Railway y el frontend buildeable para Vercel. Sin cambios a la lógica del pipeline ni del frontend.
+
+**Status:** ✅ Complete — 2026-05-24
+
+**Architecture:**
+- Backend → Railway (Docker). URL pública tipo `https://dicomto3d-api.up.railway.app`
+- Frontend → Vercel (static build). URL pública tipo `https://dicomto3d.vercel.app`
+- `VITE_API_URL` en Vercel apunta al backend de Railway
+- `CORS_ORIGINS` en Railway apunta al dominio de Vercel
+
+**Acceptance criteria:**
+1. `docker build` completa sin errores — ⚠ no ejecutado (Docker no instalado en máquina de desarrollo)
+2. `docker run` arranca y responde — ⚠ no ejecutado
+3. `railway.json` creado correctamente — ✅
+4. `.dockerignore` creado — ✅
+5. `frontend/vercel.json` creado — ✅
+6. CORS acepta `CORS_ORIGINS` env var — ✅ fallback: `http://localhost:5173`
+7. `npm run build` genera `dist/` sin errores — ✅ 603ms, 796KB JS + 12KB CSS
+8. Funcionamiento local sin romper — ✅ solo CORS modificado en `api/main.py`
+
+**Files created:**
+- `Dockerfile`
+- `.dockerignore`
+- `railway.json`
+- `frontend/vercel.json`
+
+**Files modified:**
+- `api/main.py` — CORS `allow_origins` lee de `CORS_ORIGINS` env var (fallback: `http://localhost:5173`)
+
+**dist/ bundle para Vercel:**
+```
+dist/index.html            1KB
+dist/assets/index-*.js   780KB  (Three.js + React + axios)
+dist/assets/index-*.css   12KB
+```
+
+**Known issues:**
+- Docker build no verificado localmente — instalar Docker Desktop y ejecutar `docker build -t dicomto3d-api .` antes del deploy
+- Bundle JS ~780KB — aceptable para MVP; code-splitting en fase futura si Railway da timeout en cold start
+- `jobs_store` en memoria — se resetea al reiniciar el contenedor. Jobs en curso se pierden en restart
+
+**Next steps para deploy real:**
+
+Railway (backend):
+1. Instalar Railway CLI: `npm install -g @railway/cli`
+2. `railway login` → `railway init` en la raíz del proyecto
+3. `railway up` — Railway detecta `Dockerfile` y `railway.json` automáticamente
+4. En el dashboard: agregar variable `CORS_ORIGINS=https://tu-app.vercel.app`
+5. Anotar la URL generada (ej: `https://dicomto3d-api.up.railway.app`)
+
+Vercel (frontend):
+1. `npm install -g vercel` → `cd frontend && vercel`
+2. Framework: Vite, Root Directory: `frontend`
+3. En el dashboard: agregar variable `VITE_API_URL=https://dicomto3d-api.up.railway.app`
+4. `vercel --prod` para deploy de producción
+
 ## Notes for Claude
 - Prioritize clean, readable, well-commented code over clever abstractions
 - Each module should work independently and be testable on its own
