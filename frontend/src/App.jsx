@@ -12,6 +12,7 @@ export default function App() {
   const [fileCount, setFileCount] = useState(0)
   const [jobId, setJobId] = useState(null)
   const [metrics, setMetrics] = useState(null)
+  const [dicomMeta, setDicomMeta] = useState(null)
   const [dark, setDark] = useState(false)
 
   const reset = () => {
@@ -20,6 +21,7 @@ export default function App() {
     setFileCount(0)
     setJobId(null)
     setMetrics(null)
+    setDicomMeta(null)
   }
 
   const stepIndex = { upload: 0, configure: 1, processing: 1, result: 2 }
@@ -36,9 +38,10 @@ export default function App() {
         {step === 'upload' && (
           <UploadScreen
             dark={dark}
-            onDone={(id, count) => {
+            onDone={(id, count, meta) => {
               setUploadId(id)
               setFileCount(count)
+              setDicomMeta(meta)
               setStep('configure')
             }}
           />
@@ -48,6 +51,7 @@ export default function App() {
             dark={dark}
             uploadId={uploadId}
             fileCount={fileCount}
+            dicomMeta={dicomMeta}
             onBack={() => setStep('upload')}
             onDone={(jid) => {
               setJobId(jid)

@@ -33,17 +33,25 @@ function StlViewer({ jobId, dark }) {
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setSize(w, h)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.1
     el.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6))
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9)
-    dir.position.set(200, 300, 200)
-    scene.add(dir)
-    const dir2 = new THREE.DirectionalLight(0x8aafdf, 0.3)
-    dir2.position.set(-200, -100, -200)
-    scene.add(dir2)
+    // Lighting: hemisphere fill + key + rim — produces readable anatomy on dark bg
+    scene.add(new THREE.HemisphereLight(0xfff4e8, 0x203040, 0.8))
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.1)
+    keyLight.position.set(150, 300, 250)
+    scene.add(keyLight)
+
+    const fillLight = new THREE.DirectionalLight(0xaac8e8, 0.35)
+    fillLight.position.set(-200, -80, -100)
+    scene.add(fillLight)
+
+    const rimLight = new THREE.DirectionalLight(0xffe8cc, 0.25)
+    rimLight.position.set(80, 120, -280)
+    scene.add(rimLight)
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -78,10 +86,11 @@ function StlViewer({ jobId, dark }) {
           const scale = 260 / maxDim
           geometry.scale(scale, scale, scale)
 
-          const material = new THREE.MeshPhongMaterial({
-            color: new THREE.Color('#8faabf'),
-            specular: new THREE.Color('#2a4a6a'),
-            shininess: 40,
+          // Bone-white warm material — anatomically accurate color for CT cortical bone
+          const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color('#d4c4ae'),
+            roughness: 0.62,
+            metalness: 0.04,
             side: THREE.DoubleSide,
           })
           const mesh = new THREE.Mesh(geometry, material)

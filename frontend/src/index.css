@@ -7,7 +7,7 @@
 }
 
 body {
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', system-ui, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -69,4 +69,9 @@ input[type="range"]::-moz-range-thumb {
   background: linear-gradient(90deg, #4d82bc 0%, #6da0d4 50%, #4d82bc 100%);
   background-size: 200% auto;
   animation: progress-shine 2s linear infinite;
+}
+
+/* Heading font — applied to h1, h2, h3 for clinical precision feel */
+h1, h2, h3, h4 {
+  font-family: 'Figtree', 'Inter', system-ui, sans-serif;
 }

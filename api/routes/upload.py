@@ -15,11 +15,37 @@ from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+import pydicom  # already in requirements.txt
+
 from api.schemas import UploadResponse
 from api.security import upload_rate_limit
 from api.worker import uploads_store
 
 router = APIRouter()
+
+
+def _read_dicom_meta(temp_dir: str) -> dict:
+    """
+    Read DICOM metadata from the first valid file in temp_dir.
+    Uses stop_before_pixels=True to avoid loading pixel data — header-only read.
+    Returns a dict with pixel_spacing, slice_thickness, modality (all str or absent).
+    """
+    for fname in sorted(os.listdir(temp_dir)):
+        fpath = os.path.join(temp_dir, fname)
+        try:
+            ds = pydicom.dcmread(fpath, stop_before_pixels=True, force=False)
+            meta: dict = {}
+            if hasattr(ds, "PixelSpacing"):
+                ps = ds.PixelSpacing
+                meta["pixel_spacing"] = f"{float(ps[0]):.2f} mm"
+            if hasattr(ds, "SliceThickness"):
+                meta["slice_thickness"] = f"{float(ds.SliceThickness):.2f} mm"
+            if hasattr(ds, "Modality"):
+                meta["modality"] = str(ds.Modality)
+            return meta
+        except Exception:
+            continue  # skip non-DICOM or unreadable files
+    return {}
 
 # Fix 2 — upload limits
 _MAX_FILES = 1000                      # max DICOM files per upload
@@ -63,4 +89,11 @@ async def upload_dicom(files: List[UploadFile] = File(...)):
         raise
 
     uploads_store[upload_id] = temp_dir
-    return UploadResponse(upload_id=upload_id, file_count=len(files))
+    meta = _read_dicom_meta(temp_dir)
+    return UploadResponse(
+        upload_id=upload_id,
+        file_count=len(files),
+        pixel_spacing=meta.get("pixel_spacing"),
+        slice_thickness=meta.get("slice_thickness"),
+        modality=meta.get("modality"),
+    )

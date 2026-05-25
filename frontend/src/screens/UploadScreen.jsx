@@ -13,7 +13,9 @@ export default function UploadScreen({ dark, onDone }) {
   const border = dark ? '#1e3355' : '#c8d6e8'
   const text = dark ? '#ddeaf8' : '#152033'
   const sub = dark ? '#8aaacb' : '#4d6a8a'
-  const dragBg = dragging ? (dark ? '#162840' : '#e8f0f9') : card
+  const dragBg = dragging
+    ? (dark ? '#162840' : '#ddeaf7')
+    : (dark ? '#0e1a2e' : '#f5f8fd')
 
   const addFiles = useCallback((incoming) => {
     const all = Array.from(incoming)
@@ -51,7 +53,11 @@ export default function UploadScreen({ dark, onDone }) {
     setLoading(true)
     try {
       const result = await uploadDicoms(files)
-      onDone(result.upload_id, files.length)
+      onDone(result.upload_id, files.length, {
+        pixel_spacing: result.pixel_spacing ?? null,
+        slice_thickness: result.slice_thickness ?? null,
+        modality: result.modality ?? null,
+      })
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Upload failed')
     } finally {
@@ -83,7 +89,20 @@ export default function UploadScreen({ dark, onDone }) {
           marginBottom: 16,
         }}
       >
-        <div style={{ fontSize: 40, marginBottom: 12 }}>📂</div>
+        <svg
+          width="52" height="52"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={dragging ? '#4d82bc' : (dark ? '#4d82bc' : '#6a8fae')}
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ marginBottom: 12, opacity: dragging ? 1 : 0.75, transition: 'opacity 0.15s' }}
+        >
+          <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
+          <path d="M12 12v9"/>
+          <path d="m16 16-4-4-4 4"/>
+        </svg>
         <p style={{ fontWeight: 600, color: text, marginBottom: 4 }}>
           Drag & drop DICOM files here
         </p>

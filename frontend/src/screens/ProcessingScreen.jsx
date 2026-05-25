@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { wsUrl } from '../api.js'
+import Spinner from '../components/Spinner.jsx'
 
 const STAGE_LABELS = {
   loading: 'Loading DICOM files',
@@ -114,13 +115,6 @@ export default function ProcessingScreen({ dark, jobId, onDone, onError }) {
     return sub
   }
 
-  const stageIcon = (m) => {
-    if (m.isError) return '✗'
-    if (m.done) return '✓'
-    if (m.active) return '●'
-    return '○'
-  }
-
   if (errMsg) {
     return (
       <div style={{ maxWidth: 560, margin: '0 auto' }}>
@@ -209,11 +203,30 @@ export default function ProcessingScreen({ dark, jobId, onDone, onError }) {
           <span style={{ color: sub }}>Connecting to pipeline…</span>
         ) : (
           messages.map((m, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 5 }}>
-              <span style={{ color: stageColor(m), fontWeight: 700, minWidth: 14, marginTop: 1 }}>
-                {stageIcon(m)}
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+              <span style={{ minWidth: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {m.isError && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <circle cx="7" cy="7" r="6.5" stroke="#ef4444" strokeWidth="1.2"/>
+                    <path d="M4.5 4.5l5 5M9.5 4.5l-5 5" stroke="#ef4444" strokeWidth="1.3" strokeLinecap="round"/>
+                  </svg>
+                )}
+                {m.done && !m.isError && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <circle cx="7" cy="7" r="6.5" stroke="#22c98a" strokeWidth="1.2"/>
+                    <path d="M4 7l2.5 2.5L10 4.5" stroke="#22c98a" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                {m.active && !m.isError && !m.done && (
+                  <Spinner size={14} color="#4d82bc" />
+                )}
+                {!m.active && !m.done && !m.isError && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <circle cx="7" cy="7" r="6.5" stroke={sub} strokeWidth="1.2" strokeDasharray="2 2"/>
+                  </svg>
+                )}
               </span>
-              <span style={{ color: stageColor(m) }}>
+              <span style={{ color: stageColor(m), fontSize: 13 }}>
                 [{m.stage}] {m.message}
               </span>
             </div>

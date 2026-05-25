@@ -149,7 +149,7 @@ function Slider({ def, value, onChange, dark }) {
   )
 }
 
-export default function ConfigureScreen({ dark, uploadId, fileCount, onBack, onDone }) {
+export default function ConfigureScreen({ dark, uploadId, fileCount, dicomMeta, onBack, onDone }) {
   const [params, setParams] = useState(DEFAULTS)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -342,9 +342,9 @@ export default function ConfigureScreen({ dark, uploadId, fileCount, onBack, onD
         {[
           ['Upload ID', uploadId ? `${uploadId.slice(0, 8)}…` : '—'],
           ['Files', fileCount || '—'],
-          ['Pixel Spacing', '—'],
-          ['Slice Thickness', '—'],
-          ['Modality', '—'],
+          ['Pixel Spacing', dicomMeta?.pixel_spacing || '—'],
+          ['Slice Thickness', dicomMeta?.slice_thickness || '—'],
+          ['Modality', dicomMeta?.modality || '—'],
         ].map(([label, val]) => (
           <div
             key={label}
@@ -357,7 +357,17 @@ export default function ConfigureScreen({ dark, uploadId, fileCount, onBack, onD
             }}
           >
             <span style={{ color: sub }}>{label}</span>
-            <span style={{ color: text, fontWeight: 500 }}>{val}</span>
+            <span style={{
+              color: val === '—' ? sub : text,
+              fontWeight: val === '—' ? 400 : 500,
+              fontSize: val === '—' ? 11 : 13,
+              fontStyle: val === '—' ? 'italic' : 'normal',
+              backgroundColor: val === '—' ? (dark ? '#1a2840' : '#f1f5fb') : 'transparent',
+              borderRadius: val === '—' ? 4 : 0,
+              padding: val === '—' ? '1px 6px' : '0',
+            }}>
+              {val === '—' ? 'Not in header' : val}
+            </span>
           </div>
         ))}
 

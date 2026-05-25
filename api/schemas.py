@@ -48,6 +48,10 @@ class JobRequest(BaseModel):
 class UploadResponse(BaseModel):
     upload_id: str
     file_count: int
+    # DICOM metadata extracted from first valid slice header — None if unreadable
+    pixel_spacing: Optional[str] = None     # e.g. "0.32 mm"
+    slice_thickness: Optional[str] = None  # e.g. "3.00 mm"
+    modality: Optional[str] = None         # e.g. "CT"
 
 
 class JobMetrics(BaseModel):
