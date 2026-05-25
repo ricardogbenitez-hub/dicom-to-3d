@@ -53,6 +53,9 @@ prompts/
 # Claude Code local state (settings, caches, conversation history)
 .claude/
 
+# Project development notes — kept locally but not published
+CLAUDE.md
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 
