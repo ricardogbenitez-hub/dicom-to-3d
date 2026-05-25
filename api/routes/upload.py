@@ -6,6 +6,7 @@ POST /upload — receives DICOM files, saves to a temp directory, returns upload
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -53,6 +54,12 @@ _MAX_FILE_BYTES = 10 * 1024 * 1024    # 10 MB per individual file
 _SAFE_FILENAME = re.compile(r"[^\w.\-]")  # allow alphanumeric, dot, hyphen, underscore
 
 
+def _write_bytes(dest: str, content: bytes) -> None:
+    """Synchronous file write — called from a thread pool via run_in_executor."""
+    with open(dest, "wb") as out:
+        out.write(content)
+
+
 @router.post("/upload", response_model=UploadResponse, dependencies=[Depends(upload_rate_limit)])
 async def upload_dicom(files: List[UploadFile] = File(...)):
     """
@@ -60,6 +67,9 @@ async def upload_dicom(files: List[UploadFile] = File(...)):
 
     Saves them to a unique temp directory and returns an upload_id to reference
     in POST /jobs. Files are stored with sanitized names.
+
+    Reads are sequential (multipart requires it), but disk writes are issued
+    concurrently via run_in_executor to avoid blocking the event loop.
     """
     if len(files) > _MAX_FILES:
         raise HTTPException(
@@ -71,6 +81,9 @@ async def upload_dicom(files: List[UploadFile] = File(...)):
     temp_dir = tempfile.mkdtemp(prefix=f"dicom_{upload_id[:8]}_")
 
     try:
+        # Phase 1 — read all files into memory sequentially.
+        # Multipart streaming requires sequential reads; we can't await concurrently here.
+        pending_writes: list[tuple[str, bytes]] = []
         for i, f in enumerate(files):
             content = await f.read()
             if len(content) > _MAX_FILE_BYTES:
@@ -81,9 +94,17 @@ async def upload_dicom(files: List[UploadFile] = File(...)):
             # Sanitize filename to prevent path traversal
             raw_name = os.path.basename(f.filename or "")
             safe_name = _SAFE_FILENAME.sub("_", raw_name) or f"file_{i:04d}"
-            dest = os.path.join(temp_dir, safe_name)
-            with open(dest, "wb") as out:
-                out.write(content)
+            pending_writes.append((os.path.join(temp_dir, safe_name), content))
+
+        # Phase 2 — write all files to disk concurrently.
+        # run_in_executor dispatches each blocking open()+write() to the thread pool
+        # so all 83 files are written in parallel instead of one by one.
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(*[
+            loop.run_in_executor(None, _write_bytes, dest, content)
+            for dest, content in pending_writes
+        ])
+
     except HTTPException:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise

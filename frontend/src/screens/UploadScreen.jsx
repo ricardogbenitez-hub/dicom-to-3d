@@ -6,6 +6,7 @@ export default function UploadScreen({ dark, onDone }) {
   const [files, setFiles] = useState([])
   const [dragging, setDragging] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)   // 0-99 = transferring, 100 = server processing
   const [error, setError] = useState(null)
   const inputRef = useRef()
 
@@ -50,9 +51,12 @@ export default function UploadScreen({ dark, onDone }) {
 
   const handleUpload = async () => {
     setError(null)
+    setUploadPct(0)
     setLoading(true)
     try {
-      const result = await uploadDicoms(files)
+      const result = await uploadDicoms(files, setUploadPct)
+      // Network transfer complete — server is now writing files to disk.
+      setUploadPct(100)
       onDone(result.upload_id, files.length, {
         pixel_spacing: result.pixel_spacing ?? null,
         slice_thickness: result.slice_thickness ?? null,
@@ -62,6 +66,7 @@ export default function UploadScreen({ dark, onDone }) {
       setError(err?.response?.data?.detail || err.message || 'Upload failed')
     } finally {
       setLoading(false)
+      setUploadPct(0)
     }
   }
 
@@ -199,6 +204,37 @@ export default function UploadScreen({ dark, onDone }) {
         </div>
       )}
 
+      {/* Upload progress bar — shown only while loading */}
+      {loading && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: 12,
+            color: sub,
+            marginBottom: 5,
+          }}>
+            <span>{uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Processing on server…'}</span>
+            <span>{uploadPct < 100 ? `${uploadPct}%` : '✓ Transfer complete'}</span>
+          </div>
+          <div style={{
+            width: '100%',
+            height: 6,
+            backgroundColor: dark ? '#1e3355' : '#dde8f5',
+            borderRadius: 999,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${uploadPct < 100 ? uploadPct : 100}%`,
+              backgroundColor: uploadPct < 100 ? '#4d82bc' : '#22c55e',
+              borderRadius: 999,
+              transition: 'width 0.2s ease, background-color 0.3s ease',
+            }} />
+          </div>
+        </div>
+      )}
+
       {/* Continue button */}
       <button
         onClick={handleUpload}
@@ -220,7 +256,7 @@ export default function UploadScreen({ dark, onDone }) {
           transition: 'background-color 0.15s',
         }}
       >
-        {loading ? <><Spinner size={20} color="#fff" /> Uploading…</> : `Continue → (${files.length} files)`}
+        {loading ? <><Spinner size={20} color="#fff" /> {uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Processing…'}</> : `Continue → (${files.length} files)`}
       </button>
     </div>
   )
