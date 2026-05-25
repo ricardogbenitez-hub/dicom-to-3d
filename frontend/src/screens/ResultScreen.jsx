@@ -97,8 +97,11 @@ function StlViewer({ jobId, dark }) {
           scene.add(mesh)
           meshRef.current = mesh
 
-          // Position camera
-          camera.position.set(0, 0, 400)
+          // Top-down view: camera high on Y, small Z offset to avoid gimbal lock
+          // with OrbitControls. User can orbit freely from here.
+          camera.position.set(0, 400, 80)
+          controls.target.set(0, 0, 0)
+          camera.lookAt(0, 0, 0)
           controls.update()
           setLoading(false)
         },

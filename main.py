@@ -15,6 +15,7 @@ Usage examples:
 """
 
 import argparse
+import gc
 import os
 import sys
 
@@ -125,9 +126,18 @@ def run_pipeline(args):
     else:
         verts, faces, normals = segment_soft_tissue(volume, spacing=spacing)
 
+    # Resampled HU volume is fully consumed by the segmentor — release it before
+    # building the mesh so peak RSS stays within Railway's 512 MB limit.
+    del volume
+    gc.collect()
+
     # ── 5. BUILD & EXPORT MESH ──────────────────────────────
     print("\n[5/5] Building and cleaning mesh...")
     mesh = build_mesh(verts, faces)
+    # trimesh copies verts/faces into its own internal arrays during process=True;
+    # the originals are redundant from this point on.
+    del verts, faces, normals
+    gc.collect()
     mesh = keep_largest_component(mesh, min_ratio=args.min_component_ratio)
     if args.max_bodies is not None:
         mesh = filter_max_bodies(mesh, args.max_bodies)

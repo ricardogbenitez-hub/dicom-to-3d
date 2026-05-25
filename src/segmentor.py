@@ -20,6 +20,8 @@ Typical HU thresholds:
   Fat:              -100 to -50 HU
 """
 
+import gc
+
 import numpy as np
 from scipy.ndimage import binary_fill_holes
 from skimage.measure import marching_cubes
@@ -91,6 +93,11 @@ def extract_surface(
         # This converts hollow cortical shells (trabecular interior below threshold)
         # into solid bones — eliminates tunnels and internal surface artifacts.
         mask = volume_smooth > threshold
+        # volume_smooth (float32, ~270 MB for 400-slice CT) is no longer needed now
+        # that we have the binary mask. Free it before closing/fill_holes to stay
+        # within Railway's 512 MB limit.
+        del volume_smooth
+        gc.collect()
 
         # Zero volume border (4 voxels). Prevents sigma-blurred bone from touching
         # the scan wall — wall contact lets binary_fill_holes seal the entire face,
@@ -127,6 +134,10 @@ def extract_surface(
         step_size=step_size,
         allow_degenerate=False,
     )
+    # volume_smooth is now consumed by marching_cubes — free it before returning
+    # the large verts/faces arrays to the caller.
+    del volume_smooth
+    gc.collect()
 
     print(f"Mesh extracted: {len(verts):,} vertices, {len(faces):,} triangles")
     return verts, faces, normals
